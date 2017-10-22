@@ -2,6 +2,7 @@ package gherkin;
 
 import gherkin.ast.Location;
 import gherkin.deps.com.google.gson.Gson;
+import gherkin.exceptions.DialectEncodingException;
 
 import java.io.InputStreamReader;
 import java.io.Reader;
@@ -23,7 +24,7 @@ public class GherkinDialectProvider implements IGherkinDialectProvider {
             Reader dialects = new InputStreamReader(GherkinDialectProvider.class.getResourceAsStream("/gherkin/gherkin-languages.json"), "UTF-8");
             DIALECTS = gson.fromJson(dialects, Map.class);
         } catch (UnsupportedEncodingException e) {
-            throw new RuntimeException(e);
+            throw new DialectEncodingException(e);
         }
     }
 

@@ -16,6 +16,7 @@ import gherkin.ast.Step;
 import gherkin.ast.TableCell;
 import gherkin.ast.TableRow;
 import gherkin.ast.Tag;
+import gherkin.exceptions.GrammarException;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -137,7 +138,7 @@ public class AstBuilder implements Builder<GherkinDocument> {
         } else {
             AstNode scenarioOutlineNode = node.getSingle(RuleType.ScenarioOutline, null);
             if (scenarioOutlineNode == null) {
-                throw new RuntimeException("Internal grammar error");
+                throw new GrammarException("Internal grammar error");
             }
             Token scenarioOutlineLine = scenarioOutlineNode.getToken(TokenType.ScenarioOutlineLine);
             String description = getDescription(scenarioOutlineNode);
