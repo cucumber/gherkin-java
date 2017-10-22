@@ -193,8 +193,9 @@ public class AstBuilder implements Builder<GherkinDocument> {
             case Description: return describe(node);
             case Feature: return getFeature(node);
             case GherkinDocument: return getDocument(node);
+            default:return node;
         }
-        return node;
+        
     }
 
     private List<TableRow> getTableRows(AstNode node) {
