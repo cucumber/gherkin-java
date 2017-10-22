@@ -16,6 +16,7 @@ import gherkin.ast.Step;
 import gherkin.ast.TableCell;
 import gherkin.ast.TableRow;
 import gherkin.ast.Tag;
+import gherkin.exceptions.GrammarException;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -69,117 +70,132 @@ public class AstBuilder implements Builder<GherkinDocument> {
         currentNode().add(node.ruleType, transformedNode);
     }
 
-    private Object getTransformedNode(AstNode node) {
-        switch (node.ruleType) {
-            case Step: {
-                Token stepLine = node.getToken(TokenType.StepLine);
-                Node stepArg = node.getSingle(RuleType.DataTable, null);
-                if (stepArg == null) {
-                    stepArg = node.getSingle(RuleType.DocString, null);
-                }
-                return new Step(getLocation(stepLine, 0), stepLine.matchedKeyword, stepLine.matchedText, stepArg);
-            }
-            case DocString: {
-                Token separatorToken = node.getTokens(TokenType.DocStringSeparator).get(0);
-                String contentType = separatorToken.matchedText.length() > 0 ? separatorToken.matchedText : null;
-                List<Token> lineTokens = node.getTokens(TokenType.Other);
-                StringBuilder content = new StringBuilder();
-                boolean newLine = false;
-                for (Token lineToken : lineTokens) {
-                    if (newLine) content.append("\n");
-                    newLine = true;
-                    content.append(lineToken.matchedText);
-                }
-                return new DocString(getLocation(separatorToken, 0), contentType, content.toString());
-            }
-            case DataTable: {
-                List<TableRow> rows = getTableRows(node);
-                return new DataTable(rows);
-            }
-            case Background: {
-                Token backgroundLine = node.getToken(TokenType.BackgroundLine);
-                String description = getDescription(node);
-                List<Step> steps = getSteps(node);
-                return new Background(getLocation(backgroundLine, 0), backgroundLine.matchedKeyword, backgroundLine.matchedText, description, steps);
-            }
-            case Scenario_Definition: {
-                List<Tag> tags = getTags(node);
-                AstNode scenarioNode = node.getSingle(RuleType.Scenario, null);
+    private DataTable dataTableRows(AstNode node) {
+    	List<TableRow> rows = getTableRows(node);
+        return new DataTable(rows);
+    }
+    
+    private String describe(AstNode node) {
+        List<Token> lineTokens = node.getTokens(TokenType.Other);
+        // Trim trailing empty lines
+        int end = lineTokens.size();
+        while (end > 0 && lineTokens.get(end - 1).matchedText.matches("\\s*")) {
+            end--;
+        }
+        lineTokens = lineTokens.subList(0, end);
 
-                if (scenarioNode != null) {
-                    Token scenarioLine = scenarioNode.getToken(TokenType.ScenarioLine);
-                    String description = getDescription(scenarioNode);
-                    List<Step> steps = getSteps(scenarioNode);
-
-                    return new Scenario(tags, getLocation(scenarioLine, 0), scenarioLine.matchedKeyword, scenarioLine.matchedText, description, steps);
-                } else {
-                    AstNode scenarioOutlineNode = node.getSingle(RuleType.ScenarioOutline, null);
-                    if (scenarioOutlineNode == null) {
-                        throw new RuntimeException("Internal grammar error");
-                    }
-                    Token scenarioOutlineLine = scenarioOutlineNode.getToken(TokenType.ScenarioOutlineLine);
-                    String description = getDescription(scenarioOutlineNode);
-                    List<Step> steps = getSteps(scenarioOutlineNode);
-
-                    List<Examples> examplesList = scenarioOutlineNode.getItems(RuleType.Examples_Definition);
-
-                    return new ScenarioOutline(tags, getLocation(scenarioOutlineLine, 0), scenarioOutlineLine.matchedKeyword, scenarioOutlineLine.matchedText, description, steps, examplesList);
-
-                }
+        return join(new StringUtils.ToString<Token>() {
+            @Override
+            public String toString(Token t) {
+                return t.matchedText;
             }
-            case Examples_Definition: {
-                List<Tag> tags = getTags(node);
-                AstNode examplesNode = node.getSingle(RuleType.Examples, null);
-                Token examplesLine = examplesNode.getToken(TokenType.ExamplesLine);
-                String description = getDescription(examplesNode);
-                List<TableRow> rows = examplesNode.getSingle(RuleType.Examples_Table, null);
-                TableRow tableHeader = rows != null && !rows.isEmpty() ? rows.get(0) : null;
-                List<TableRow> tableBody = rows != null && !rows.isEmpty() ? rows.subList(1, rows.size()) : null;
-                return new Examples(getLocation(examplesLine, 0), tags, examplesLine.matchedKeyword, examplesLine.matchedText, description, tableHeader, tableBody);
-            }
-            case Examples_Table: {
-                return getTableRows(node);
-            }
-            case Description: {
-                List<Token> lineTokens = node.getTokens(TokenType.Other);
-                // Trim trailing empty lines
-                int end = lineTokens.size();
-                while (end > 0 && lineTokens.get(end - 1).matchedText.matches("\\s*")) {
-                    end--;
-                }
-                lineTokens = lineTokens.subList(0, end);
+        }, "\n", lineTokens);
+    }
 
-                return join(new StringUtils.ToString<Token>() {
-                    @Override
-                    public String toString(Token t) {
-                        return t.matchedText;
-                    }
-                }, "\n", lineTokens);
-            }
-            case Feature: {
-                AstNode header = node.getSingle(RuleType.Feature_Header, new AstNode(RuleType.Feature_Header));
-                if (header == null) return null;
-                List<Tag> tags = getTags(header);
-                Token featureLine = header.getToken(TokenType.FeatureLine);
-                if (featureLine == null) return null;
-                List<ScenarioDefinition> scenarioDefinitions = new ArrayList<>();
-                Background background = node.getSingle(RuleType.Background, null);
-                if (background != null) scenarioDefinitions.add(background);
-                scenarioDefinitions.addAll(node.<ScenarioDefinition>getItems(RuleType.Scenario_Definition));
-                String description = getDescription(header);
-                if (featureLine.matchedGherkinDialect == null) return null;
-                String language = featureLine.matchedGherkinDialect.getLanguage();
+    private Examples getExamplesDefinitions(AstNode node) {
+        List<Tag> tags = getTags(node);
+        AstNode examplesNode = node.getSingle(RuleType.Examples, null);
+        Token examplesLine = examplesNode.getToken(TokenType.ExamplesLine);
+        String description = getDescription(examplesNode);
+        List<TableRow> rows = examplesNode.getSingle(RuleType.Examples_Table, null);
+        TableRow tableHeader = rows != null && !rows.isEmpty() ? rows.get(0) : null;
+        List<TableRow> tableBody = rows != null && !rows.isEmpty() ? rows.subList(1, rows.size()) : null;
+        return new Examples(getLocation(examplesLine, 0), tags, examplesLine.matchedKeyword, examplesLine.matchedText, description, tableHeader, tableBody);
+    }
+    
+    private Feature getFeature(AstNode node) {
+        AstNode header = node.getSingle(RuleType.Feature_Header, new AstNode(RuleType.Feature_Header));
+        if (header == null) return null;
+        List<Tag> tags = getTags(header);
+        Token featureLine = header.getToken(TokenType.FeatureLine);
+        if (featureLine == null) return null;
+        List<ScenarioDefinition> scenarioDefinitions = new ArrayList<>();
+        Background background = node.getSingle(RuleType.Background, null);
+        if (background != null) scenarioDefinitions.add(background);
+        scenarioDefinitions.addAll(node.<ScenarioDefinition>getItems(RuleType.Scenario_Definition));
+        String description = getDescription(header);
+        if (featureLine.matchedGherkinDialect == null) return null;
+        String language = featureLine.matchedGherkinDialect.getLanguage();
 
-                return new Feature(tags, getLocation(featureLine, 0), language, featureLine.matchedKeyword, featureLine.matchedText, description, scenarioDefinitions);
-            }
-            case GherkinDocument: {
-                Feature feature = node.getSingle(RuleType.Feature, null);
+        return new Feature(tags, getLocation(featureLine, 0), language, featureLine.matchedKeyword, featureLine.matchedText, description, scenarioDefinitions);
+    }
+    
+    private GherkinDocument getDocument(AstNode node) {
+        Feature feature = node.getSingle(RuleType.Feature, null);
+        return new GherkinDocument(feature, comments);
+    }
 
-                return new GherkinDocument(feature, comments);
+    private ScenarioDefinition getScenarioDefinition(AstNode node) {
+        List<Tag> tags = getTags(node);
+        AstNode scenarioNode = node.getSingle(RuleType.Scenario, null);
+
+        if (scenarioNode != null) {
+            Token scenarioLine = scenarioNode.getToken(TokenType.ScenarioLine);
+            String description = getDescription(scenarioNode);
+            List<Step> steps = getSteps(scenarioNode);
+
+            return new Scenario(tags, getLocation(scenarioLine, 0), scenarioLine.matchedKeyword, scenarioLine.matchedText, description, steps);
+        } else {
+            AstNode scenarioOutlineNode = node.getSingle(RuleType.ScenarioOutline, null);
+            if (scenarioOutlineNode == null) {
+                throw new GrammarException("Internal grammar error");
             }
+            Token scenarioOutlineLine = scenarioOutlineNode.getToken(TokenType.ScenarioOutlineLine);
+            String description = getDescription(scenarioOutlineNode);
+            List<Step> steps = getSteps(scenarioOutlineNode);
+
+            List<Examples> examplesList = scenarioOutlineNode.getItems(RuleType.Examples_Definition);
+
+            return new ScenarioOutline(tags, getLocation(scenarioOutlineLine, 0), scenarioOutlineLine.matchedKeyword, scenarioOutlineLine.matchedText, description, steps, examplesList);
 
         }
-        return node;
+    }
+
+    private Background getBackground(AstNode node) {
+        Token backgroundLine = node.getToken(TokenType.BackgroundLine);
+        String description = getDescription(node);
+        List<Step> steps = getSteps(node);
+        return new Background(getLocation(backgroundLine, 0), backgroundLine.matchedKeyword, backgroundLine.matchedText, description, steps);
+    }
+    
+    private DocString getDocString(AstNode node) {
+        Token separatorToken = node.getTokens(TokenType.DocStringSeparator).get(0);
+        String contentType = separatorToken.matchedText.length() > 0 ? separatorToken.matchedText : null;
+        List<Token> lineTokens = node.getTokens(TokenType.Other);
+        StringBuilder content = new StringBuilder();
+        boolean newLine = false;
+        for (Token lineToken : lineTokens) {
+            if (newLine) content.append("\n");
+            newLine = true;
+            content.append(lineToken.matchedText);
+        }
+        return new DocString(getLocation(separatorToken, 0), contentType, content.toString());
+    }
+    
+    private Step getStep(AstNode node) {
+        Token stepLine = node.getToken(TokenType.StepLine);
+        Node stepArg = node.getSingle(RuleType.DataTable, null);
+        if (stepArg == null) {
+            stepArg = node.getSingle(RuleType.DocString, null);
+        }
+        return new Step(getLocation(stepLine, 0), stepLine.matchedKeyword, stepLine.matchedText, stepArg);
+    }
+    
+    private Object getTransformedNode(AstNode node) {
+        switch (node.ruleType) {
+            case Step: return getStep(node);
+            case DocString: return getDocString(node);
+            case DataTable: return dataTableRows(node);
+            case Background: return getBackground(node);
+            case Scenario_Definition: return getScenarioDefinition(node);
+            case Examples_Definition: return getExamplesDefinitions(node);
+            case Examples_Table: return getTableRows(node);
+            case Description: return describe(node);
+            case Feature: return getFeature(node);
+            case GherkinDocument: return getDocument(node);
+            default:return node;
+        }
+        
     }
 
     private List<TableRow> getTableRows(AstNode node) {

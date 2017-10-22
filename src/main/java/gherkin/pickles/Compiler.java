@@ -156,7 +156,7 @@ public class Compiler {
                     )
             );
         } else {
-            throw new RuntimeException("Unexpected argument type: " + argument);
+            throw new IllegalArgumentException("Unexpected argument type: " + argument);
         }
         return result;
     }
