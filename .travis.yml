@@ -1,15 +1,16 @@
 sudo: false
 language: java
+
 jdk:
 - oraclejdk8
-- oraclejdk9
-- oraclejdk10
+- openjdk11
+- openjdk-ea
 jobs:
   include:
   - stage: deploy
     jdk: oraclejdk8
     script:
-    - "./scripts/mvn_deploy.sh"
+    - "[ -z $TRAVIS_TAG ] && ./scripts/mvn_deploy.sh"
 script: make default
 env:
   global:
